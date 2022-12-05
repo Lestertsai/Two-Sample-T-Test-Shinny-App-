@@ -1,5 +1,6 @@
 library(shiny)
 library(reshape)
+library(MKinfer)
 ui <- fluidPage(titlePanel("Two Samples t-Test"),
                 
                 sidebarLayout(
@@ -107,34 +108,59 @@ server <- function(input, output, session) {
     }
     
   })
-  t_test <- function(df, first, second) {
-    df_two = df[c(first, second)]
+  var_test <- function(df, first, second) {
+    df_two <- df[c(first, second)]
     df_long <- melt(df_two)
     result <-
       var.test(value ~ variable , data = df_long)$p.value > 0.05
-    aa <- t.test(df_two[first], df_two[second], var.equal = result)
-    result <- aa$p.value
+    return(list(df_long, result))
+  }
+  word <- function(result, types) {
+    if (types == 'Bootstrap') {
+      text_first = ' but according to the bootstrap two-sample test, '
+    }
+    else{
+      text_first = 'Based on the two-sample t test,'
+    }
     if (result > 0.05) {
       return({
         paste0(
-          'Because the p-value =',
-          round(result, 3),
+          text_first,
+          'because the p-value =',
+          result,
           ', there is no significant
-               difference between the means of the two variables'
+               difference between the means of the two variables.'
         )
       })
     }
     else{
       return({
         paste(
-          'Because the p-value =',
-          round(result, 3),
+          text_first,
+          'because the p-value =',
+          result,
           ', there is a significant
-               difference between the means of the two variables'
+               difference between the means of the two variables.'
         )
       })
     }
-    
+  }
+  boot_test <- function(df, result) {
+    tt <-
+      boot.t.test(
+        value ~ variable,
+        data = df,
+        alternative = "two.sided",
+        paired = FALSE,
+        var.equal = result,
+        conf.level = 0.95,
+        R = 1000
+      )
+    return(list(round(tt$p.value, 3), 'Bootstrap'))
+  }
+  t_test <- function(df, result) {
+    aa <- t.test(value ~ variable, data = df, var.equal = result)
+    return(list(round(aa$p.value, 3), 'T Test'))
   }
   output$Text <- renderText({
     if (length(global$picks) == 2 & input$action) {
@@ -166,33 +192,50 @@ server <- function(input, output, session) {
       }
       else{
         if (nrow(df) >= 300) {
-          t_test(df, first, second)
+          equal <- var_test(df, first, second)
+          means <- t_test(equal[[1]], equal[[2]])
+          word(means[[1]], means[[2]])
         }
         else{
           ans1 <- shapiro.test(df[[first]])$p.value < 0.05
           ans2 <- shapiro.test(df[[second]])$p.value < 0.05
           if (ans1 | ans2) {
+            equal <- var_test(df, first, second)
+            boot_p <- boot_test(equal[[1]], equal[[2]])
             if (ans1 & !ans2) {
               return({
-                paste0('Variable ', first, ' is not normal distributed!')
+                paste0(
+                  'Variable ',
+                  first,
+                  ' is not normally distributed,',
+                  word(boot_p[[1]], boot_p[[2]])
+                )
               })
             }
             else if (ans2 & !ans1) {
               return({
-                paste0('Variable ',
-                       second,
-                       ' is not normal distributed!')
+                paste0(
+                  'Variable ',
+                  second,
+                  ' is not normally distributed,',
+                  word(boot_p[[1]], boot_p[[2]])
+                )
               })
             }
             else{
               return({
-                'Both variables are not normal distributed!'
+                paste0(
+                  'Both variables are not normally distributed,',
+                  word(boot_p[[1]], boot_p[[2]])
+                )
               })
             }
             
           }
           else{
-            t_test(df, first, second)
+            equal <- var_test(df, first, second)
+            means <- t_test(equal[[1]], equal[[2]])
+            word(means[[1]], means[[2]])
           }
         }
       }
